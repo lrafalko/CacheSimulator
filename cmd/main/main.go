@@ -24,6 +24,9 @@ type instruction struct {
 type cache struct {
 	dataMap     map[int][]*instruction
 	linesPerSet int
+	hits        int
+	misses      int
+	evictions   int
 }
 
 func parseAddress(addr uint64, s int, b int) (uint64, int, int) {
@@ -51,7 +54,8 @@ func createCache(sets int, lines int) *cache {
 	i := 0
 	for i < sets {
 
-		cache.dataMap[i] = make([]*instruction, 0, lines)
+		cache.dataMap[i] = make([]*instruction, lines, lines)
+		i++
 	}
 
 	cache.linesPerSet = lines
@@ -90,7 +94,6 @@ func parseInstruction(tok string, s int, b int) (*instruction, error) {
 	// parse the information from the memory address
 	// convert the string into an int
 	memAddr, err := strconv.ParseUint(splitStrs[0], 16, 64)
-	fmt.Println(memAddr)
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -105,6 +108,119 @@ func parseInstruction(tok string, s int, b int) (*instruction, error) {
 	}
 
 	return &instruct, nil
+
+}
+
+// returns whether there is a hit and an eviction
+func CacheInsert(cache *cache, insruc *instruction) (bool, bool, bool) {
+
+	set := cache.dataMap[insruc.setIndexBits]
+	idx, found := -1, false
+	var replace *instruction
+	replace_loc := -1
+	empty_loc := -1
+	var (
+		miss_return bool
+		hit_return  bool
+		evic_return bool
+	)
+	for i, v := range set {
+		if v == nil {
+			empty_loc = i
+			continue
+		}
+		if v.tag == insruc.tag {
+			found = true
+			idx = i
+
+		}
+
+		if replace == nil || v.time < replace.time {
+			replace = v
+			replace_loc = i
+		}
+
+	}
+
+	// insert instruction into set
+	if !found {
+		// miss is true
+		miss_return = true
+		hit_return = false
+		// check if eviction needs to be made
+		if empty_loc == -1 {
+			evic_return = true
+			set[replace_loc] = insruc
+		} else {
+			evic_return = false
+			set[empty_loc] = insruc
+		}
+	} else {
+		miss_return = false
+		evic_return = false
+		hit_return = true
+
+		// overwrite the instruction where the hit occured
+		set[idx] = insruc
+	}
+
+	return miss_return, hit_return, evic_return
+
+	// if
+}
+
+func addCacheTotals(cache *cache, miss_bool bool, hit_bool bool, evic_bool bool) {
+	if miss_bool {
+		cache.misses++
+	}
+
+	if hit_bool {
+		cache.hits++
+	}
+
+	if evic_bool {
+		cache.evictions++
+	}
+
+}
+
+// define cache functions
+func UpdateCache(cache *cache, instrc *instruction) error {
+	var err error
+
+	var (
+		miss_bool bool
+		hit_bool  bool
+		evic_bool bool
+	)
+	if instrc == nil || cache == nil {
+		err = errors.New("Cache or instruction pointers can not be null")
+		return err
+	}
+
+	// check for instruction type
+	if instrc.instructionType == "M" {
+		miss_bool, hit_bool, evic_bool = CacheInsert(cache, instrc)
+		addCacheTotals(cache, miss_bool, hit_bool, evic_bool)
+		miss_bool, hit_bool, evic_bool = CacheInsert(cache, instrc)
+		addCacheTotals(cache, miss_bool, hit_bool, evic_bool)
+
+	}
+
+	if instrc.instructionType == "L" {
+
+		miss_bool, hit_bool, evic_bool = CacheInsert(cache, instrc)
+		addCacheTotals(cache, miss_bool, hit_bool, evic_bool)
+	}
+
+	if instrc.instructionType == "S" {
+
+		miss_bool, hit_bool, evic_bool = CacheInsert(cache, instrc)
+		addCacheTotals(cache, miss_bool, hit_bool, evic_bool)
+	}
+
+	return nil
+
 }
 func main() {
 
@@ -131,18 +247,13 @@ func main() {
 		log.Fatal("Can't open trace at given file location")
 	}
 
+	defer fp.Close()
+
 	scanner := bufio.NewScanner(fp)
 	// init a new cace struct
 	// keep track of instruction order
 	var time int = 0
 	var instruc *instruction
-	// keep track of misses, hits, evictions
-	var (
-		misses    int = 0
-		hits      int = 0
-		evictions int = 0
-	)
-	println(time, instruc, misses, hits, evictions)
 	// init the cache
 	cache := createCache(int(math.Pow(float64(2), float64(setIndexbits))), linesFlag)
 	for scanner.Scan() {
@@ -152,6 +263,8 @@ func main() {
 			continue
 		}
 		instruc, err = parseInstruction(scanner.Text(), setIndexbits, blockBits)
+		instruc.time = time
+		time++
 
 		if err != nil {
 			log.Fatal(err.Error())
@@ -159,11 +272,13 @@ func main() {
 		}
 
 		if instruc != nil {
-
-			fmt.Printf("Tag: %d, set: %d, offset: %d\n", instruc.tag, instruc.setIndexBits, instruc.dataBits)
+			// add the instruction to the cache
+			err = UpdateCache(cache, instruc)
 		}
 
 		// add the instruction to the cache
 
 	}
+
+	fmt.Printf("Hits: %d  Misses: %d  Evictions: %d\n", cache.hits, cache.misses, cache.evictions)
 }

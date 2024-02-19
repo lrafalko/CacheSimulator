@@ -1,3 +1,9 @@
+/*
+Date 2/19/2024
+Class: CS4541
+Assignment: Assignment 2 Cache Simulator
+Author Lance Rafalko
+*/
 package main
 
 import (
@@ -8,6 +14,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 )
@@ -18,7 +25,7 @@ type instruction struct {
 	dataBits        int
 	setIndexBits    int
 	instructionType string
-	time            int
+	time            uint64
 }
 
 type cache struct {
@@ -96,6 +103,7 @@ func parseInstruction(tok string, s int, b int) (*instruction, error) {
 	memAddr, err := strconv.ParseUint(splitStrs[0], 16, 64)
 	if err != nil {
 		log.Fatal(err.Error())
+		return nil, errors.New("Parsing tag failed")
 	}
 	tag, set, byteOffset := parseAddress(memAddr, s, b)
 
@@ -161,6 +169,8 @@ func CacheInsert(cache *cache, insruc *instruction) (bool, bool, bool) {
 		hit_return = true
 
 		// overwrite the instruction where the hit occured
+		prev_innstruc := set[idx]
+		insruc.time = prev_innstruc.time
 		set[idx] = insruc
 	}
 
@@ -239,7 +249,7 @@ func main() {
 	flag.Parse()
 
 	workdir, err := os.Getwd()
-	var filePath string = workdir + traceFile
+	var filePath string = path.Join(workdir, traceFile)
 
 	fp, err := os.Open(filePath)
 
@@ -252,7 +262,7 @@ func main() {
 	scanner := bufio.NewScanner(fp)
 	// init a new cace struct
 	// keep track of instruction order
-	var time int = 0
+	var time uint64 = 0
 	var instruc *instruction
 	// init the cache
 	cache := createCache(int(math.Pow(float64(2), float64(setIndexbits))), linesFlag)
@@ -263,8 +273,6 @@ func main() {
 			continue
 		}
 		instruc, err = parseInstruction(scanner.Text(), setIndexbits, blockBits)
-		instruc.time = time
-		time++
 
 		if err != nil {
 			log.Fatal(err.Error())
@@ -272,9 +280,12 @@ func main() {
 		}
 
 		if instruc != nil {
+
+			instruc.time = time
 			// add the instruction to the cache
 			err = UpdateCache(cache, instruc)
 		}
+		time++
 
 		// add the instruction to the cache
 
